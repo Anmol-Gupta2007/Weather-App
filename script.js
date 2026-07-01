@@ -12,7 +12,6 @@ let debounceTimer;
 cityInput.addEventListener('input', (e) => {
     clearTimeout(debounceTimer);
     const query = e.target.value.trim();
-    
     if (query.length > 2) {
         debounceTimer = setTimeout(() => fetchCitySuggestions(query), 300);
     } else {
@@ -22,17 +21,15 @@ cityInput.addEventListener('input', (e) => {
 
 async function fetchCitySuggestions(query) {
     try {
-        const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(query)}&count=8&language=en&format=json`;
+        const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(query)}&count=5&language=en&format=json`;
         const res = await fetch(url);
         const data = await res.json();
         
         dataList.innerHTML = '';
-        
         if (data.results) {
             data.results.forEach(city => {
                 const adminInfo = city.admin1 ? `${city.admin1}, ` : '';
                 const fullName = `${city.name}, ${adminInfo}${city.country}`;
-                
                 const option = document.createElement('option');
                 option.value = fullName;
                 option.dataset.lat = city.latitude;
@@ -46,57 +43,69 @@ async function fetchCitySuggestions(query) {
     }
 }
 
-// UI Helpers
 function showMessage(msg) {
     weatherInfo.style.display = 'none';
     messageBox.style.display = 'block';
     messageBox.textContent = msg;
 }
 
-function parseWeather(code) {
-    if (code === 0) return { desc: 'Sunny / Clear', type: 'sunny' };
+// Map accurate WMO codes to logic types
+function parseWeather(code, isDay) {
+    if (code === 0) return { desc: isDay ? 'Sunny' : 'Clear Night', type: 'sunny' };
     if (code === 1 || code === 2) return { desc: 'Partly Cloudy', type: 'partly' };
     if (code === 3) return { desc: 'Overcast', type: 'cloudy' };
     if ([45, 48].includes(code)) return { desc: 'Fog', type: 'cloudy' };
     if ([51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 80, 81, 82].includes(code)) return { desc: 'Rainy', type: 'rainy' };
     if ([71, 73, 75, 77, 85, 86].includes(code)) return { desc: 'Snow', type: 'cloudy' };
-    if ([95, 96, 99].includes(code)) return { desc: 'Thunderstorm', type: 'rainy' };
+    if ([95, 96, 99].includes(code)) return { desc: 'Thunderstorm', type: 'thunder' };
     return { desc: 'Unknown', type: 'default' };
 }
 
-function setBackground(type) {
+function setBackground(type, isDay) {
     bgAnimation.innerHTML = ''; 
     bgAnimation.className = `bg-${type}`;
 
-    if (type === 'sunny' || type === 'partly') {
+    // Show SUN if it's strictly sunny, OR if it's partly cloudy (sun & clouds)
+    if ((type === 'sunny' || type === 'partly') && isDay) {
         const sun = document.createElement('div');
         sun.className = 'sun';
         bgAnimation.appendChild(sun);
     }
-    if (type === 'cloudy' || type === 'partly' || type === 'rainy') {
+    
+    // Show CLOUDS for cloudy, partly cloudy (sun & clouds), rainy, and thunderstorm
+    if (type === 'cloudy' || type === 'partly' || type === 'rainy' || type === 'thunder') {
         const cloud1 = document.createElement('div'); cloud1.className = 'cloud cloud1';
         const cloud2 = document.createElement('div'); cloud2.className = 'cloud cloud2';
         bgAnimation.append(cloud1, cloud2);
     }
-    if (type === 'rainy') {
+    
+    // Show RAIN for rainy and thunderstorms
+    if (type === 'rainy' || type === 'thunder') {
         const rain = document.createElement('div'); rain.className = 'rain';
-        for (let i = 0; i < 50; i++) {
+        for (let i = 0; i < 70; i++) {
             const drop = document.createElement('div'); drop.className = 'drop';
             drop.style.left = `${Math.random() * 100}%`;
-            drop.style.animationDuration = `${Math.random() * 0.5 + 0.5}s`;
+            drop.style.animationDuration = `${Math.random() * 0.4 + 0.4}s`;
             drop.style.animationDelay = `${Math.random() * 2}s`;
             rain.appendChild(drop);
         }
         bgAnimation.appendChild(rain);
     }
+
+    // Show LIGHTNING for thunderstorms
+    if (type === 'thunder') {
+        const lightning = document.createElement('div');
+        lightning.className = 'lightning';
+        bgAnimation.appendChild(lightning);
+    }
 }
 
-// Main Weather Fetch Logic
 async function fetchWeather(lat, lon, locationName) {
     try {
-        showMessage('Fetching current data...');
+        showMessage('Fetching accurate data...');
         
-        const weatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,weather_code,surface_pressure,wind_speed_10m&hourly=visibility,uv_index&timezone=auto`;
+        // Highly specific request for accurate current data
+        const weatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,weather_code,surface_pressure,wind_speed_10m,is_day&hourly=visibility,uv_index&timezone=auto&forecast_days=1`;
         const aqiUrl = `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${lat}&longitude=${lon}&current=european_aqi`;
         
         const [weatherRes, aqiRes] = await Promise.all([fetch(weatherUrl), fetch(aqiUrl)]);
@@ -104,10 +113,12 @@ async function fetchWeather(lat, lon, locationName) {
         const aqiData = await aqiRes.json();
 
         const current = weatherData.current;
-        const condition = parseWeather(current.weather_code);
+        const condition = parseWeather(current.weather_code, current.is_day);
         
-        const visibilityKm = (weatherData.hourly.visibility[0] / 1000).toFixed(1); 
-        const uvIndex = weatherData.hourly.uv_index[0] || 0;
+        // The API returns an array for hourly data. We grab the current hour's index based on current time.
+        const currentHour = new Date().getHours();
+        const visibilityKm = (weatherData.hourly.visibility[currentHour] / 1000).toFixed(1) || '--'; 
+        const uvIndex = weatherData.hourly.uv_index[currentHour] || 0;
         const aqi = aqiData.current.european_aqi || '--';
 
         // Update UI
@@ -125,14 +136,14 @@ async function fetchWeather(lat, lon, locationName) {
         document.getElementById('visibility').textContent = `${visibilityKm} km`;
         document.getElementById('aqi').textContent = aqi;
 
-        setBackground(condition.type);
+        setBackground(condition.type, current.is_day);
 
     } catch (error) {
-        showMessage('Error fetching data. Try again.');
+        showMessage('Error fetching data. Please try again.');
+        console.error(error);
     }
 }
 
-// Execution Logic
 function handleSearch() {
     const inputValue = cityInput.value.trim();
     if (!inputValue) return;
@@ -143,13 +154,13 @@ function handleSearch() {
     if (selectedOption) {
         fetchWeather(selectedOption.dataset.lat, selectedOption.dataset.lon, selectedOption.dataset.name);
     } else {
-        searchCity(inputValue);
+        searchCityFallback(inputValue);
     }
 }
 
-async function searchCity(city) {
+async function searchCityFallback(city) {
     try {
-        showMessage('Searching...');
+        showMessage('Searching database...');
         const geoUrl = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=1&language=en&format=json`;
         const geoRes = await fetch(geoUrl);
         const geoData = await geoRes.json();
@@ -159,7 +170,7 @@ async function searchCity(city) {
         const { latitude, longitude, name, country } = geoData.results[0];
         fetchWeather(latitude, longitude, `${name}, ${country}`);
     } catch (error) {
-        showMessage('City not found in database.');
+        showMessage('City not found. Please try a different name.');
     }
 }
 
@@ -178,4 +189,4 @@ locationBtn.addEventListener('click', () => {
     }
 });
 
-setBackground('default');
+setBackground('default', 1);
