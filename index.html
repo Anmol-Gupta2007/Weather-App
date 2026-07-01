@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Advanced Dynamic Weather App</title>
+    <title>Dynamic Weather App</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -13,7 +13,8 @@
         <div class="weather-container">
             <div class="search-box">
                 <button id="location-btn" title="Use My Location">📍</button>
-                <input type="text" id="city-input" placeholder="Enter city name..." autocomplete="off">
+                <input type="text" id="city-input" list="city-suggestions" placeholder="Type to search cities..." autocomplete="off">
+                <datalist id="city-suggestions"></datalist>
                 <button id="search-btn">Search</button>
             </div>
             
